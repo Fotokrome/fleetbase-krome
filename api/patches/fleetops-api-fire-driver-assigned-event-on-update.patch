@@ -1,0 +1,62 @@
+Subject: [PATCH] fire OrderDriverAssigned event when PUT /v1/orders/{id} changes driver
+
+The public OrderController::update() already wires the `driver` request field
+through to `driver_assigned_uuid`, but it saves via `$order->update($input)`,
+which skips the side-effect path that Order::assignDriver() takes — most
+importantly the `OrderDriverAssigned` event that drives the
+`order.driver_assigned` webhook downstream. As a result KromeOS (and any other
+webhook consumer) never receives a driver-assigned event for reassignments
+performed via the public API.
+
+Calling `$order->assignDriver()` directly would double-save the model (once
+inside assignDriver, once at the existing `$order->update($input)`). Instead
+we capture the before/after driver_assigned_uuid, let the existing single
+update() save run, and fire `notifyDriverAssigned()` once on an actual delta.
+
+Companion to KromeOS 4b (dispatcher drag-card-to-driver) — that feature needs
+the upstream event to propagate; without this patch the webhook never fires
+and KromeOS' local state machine stays stuck on the previous assignment.
+
+Idempotent: the change-detection (`!==` compare against the existing column
+value) means re-assigning the same driver fires nothing, so retries / replays
+don't generate phantom events. Verified live against the KromeFleet container
+with a registered webhook endpoint — first assign → SendResourceLifecycleWebhook
+job enqueued for `order.driver_assigned`; re-assigning same driver → only the
+routine LogApiRequest enqueues, no webhook job.
+
+--- a/server/src/Http/Controllers/Api/v1/OrderController.php
++++ b/server/src/Http/Controllers/Api/v1/OrderController.php
+@@ -362,11 +362,17 @@
+         }
+
+         // driver assignment
++        // Track whether the assignment actually changes so we can fire
++        // OrderDriverAssigned once after the single update() save below — calling
++        // $order->assignDriver() here would double-save the model.
++        $driverAssignmentChanged = false;
+         if ($request->has('driver')) {
+-            $input['driver_assigned_uuid'] = Utils::getUuid('drivers', [
++            $resolvedDriverUuid = Utils::getUuid('drivers', [
+                 'public_id'    => $request->input('driver'),
+                 'company_uuid' => session('company'),
+             ]);
++            $driverAssignmentChanged = $order->driver_assigned_uuid !== $resolvedDriverUuid;
++            $input['driver_assigned_uuid'] = $resolvedDriverUuid;
+         }
+
+         // facilitator assignment
+@@ -410,6 +416,14 @@
+         $order->update($input);
+         $order->flushAttributesCache();
+
++        // Fire OrderDriverAssigned so downstream consumers (KromeOS webhook bridge)
++        // get notified — $order->update($input) saves the column but skips the
++        // assignDriver() side-effect path. Only fire on an actual change so a
++        // no-op re-assignment doesn't generate noise events.
++        if ($driverAssignmentChanged) {
++            $order->notifyDriverAssigned();
++        }
++
+         // response the order resource
+         return new OrderResource($order);
+     }
