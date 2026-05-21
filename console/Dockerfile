@@ -17,8 +17,8 @@ COPY console/package.json console/pnpm-lock.yaml ./
 # Copy over .npmrc if applicable
 COPY console/.npmr[c] ./
 
-# Install global dependencies
-RUN npm install -g ember-cli pnpm 
+# Install global dependencies — pin pnpm to 9.x because pnpm 11+ requires Node ≥22.13
+RUN npm install -g ember-cli pnpm@9
 
 # Install git
 RUN apk update && apk add git openssh-client
