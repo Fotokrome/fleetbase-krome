@@ -7,6 +7,14 @@ RUN mkdir -p /usr/src/php/ext \
     && curl -L https://git.osgeo.org/gitea/geos/php-geos/archive/1.0.0.tar.gz > /tmp/php-geos.tar.gz \
     && tar -C /usr/src/php/ext -xzvf /tmp/php-geos.tar.gz
 
+# Debian 11 (bullseye) is EOL: deb.debian.org no longer serves the bullseye-security pool
+# (404s on files the index still lists) and archive.debian.org has no bullseye-security
+# suite. Drop the security source and read main/updates from the archive so the image
+# still builds on a cold cache. Long-term fix: move off php:7.4-fpm-bullseye.
+RUN sed -i -e '/debian-security/d' \
+           -e 's|http://deb.debian.org/debian |http://archive.debian.org/debian |g' /etc/apt/sources.list \
+    && echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-archive
+
 # Install required packages and PHP extensions
 RUN apt-get update \
     && apt-get install -y nano git unzip libzip-dev libgd-dev libfreetype6-dev libjpeg62-turbo-dev libpng-dev \
