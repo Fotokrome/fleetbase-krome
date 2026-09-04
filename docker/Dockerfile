@@ -20,6 +20,7 @@ RUN apt-get update \
     && apt-get install -y nano git unzip libzip-dev libgd-dev libfreetype6-dev libjpeg62-turbo-dev libpng-dev \
     imagemagick libmagickwand-dev --no-install-recommends libmemcached-dev libgeos-dev libgmp-dev \
     default-mysql-client libicu-dev tmux nginx dnsutils mycli redis-tools \
+    && pecl channel-update pecl.php.net \
     && pecl install imagick \
     && docker-php-ext-enable imagick \
     && docker-php-ext-configure gd --with-external-gd \
